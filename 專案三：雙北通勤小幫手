@@ -1,0 +1,185 @@
+# 【雙北通勤小幫手】捷運公車天氣快速查詢系統 line developer
+from flask import Flask, request
+from linebot import LineBotApi, WebhookHandler
+from linebot.models import FlexSendMessage, TextSendMessage, ImageSendMessage
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from time import sleep
+from selenium.common.exceptions import WebDriverException
+
+
+#建立{公車編號：公車代碼}的查詢字典
+data1 = {}
+with open("C:\\Users\\kaiki\\Downloads\\taipeibus.xlsx","rb") as f:
+    pd1 = pd.read_excel(f)
+for a in range(0,1013):
+    x1 = pd1["公車號碼"][a]
+    y1 = pd1["公車編號"][a]
+    data1[x1]=y1
+
+#建立{捷運起站末站：票價時間資訊}的查詢字典
+data2 = {}
+with open("C:\\Users\\kaiki\\Downloads\\mrtdata.xlsx","rb") as g:
+    pd2 = pd.read_excel(g)
+for b in range(0,18058):
+    x2 = pd2["起訖站"][b]
+    y2 = pd2["合併"][b]
+    data2[x2]=y2
+
+# LINE 聊天機器人的基本資料
+app = Flask(__name__)
+line_bot_api = LineBotApi("O29DCj7xOuLMdnkNmqsDCsUN4LMyZ9KqBBMdSKoe+1ybsYWnYaQGBPK7HXsZzsUzUCpF6cAiw9AQL2BZgETXsFj+9pFpv1sNHHSpQvv3FeEcWiPYQk2ShQ6dgoDPiASvJCNkgjv21c+nQNtPCBrXkQdB04t89/1O/w1cDnyilFU=")
+@app.route("/", methods=['POST'])
+
+
+def verify():
+    data = request.get_json()
+    print(data)
+    
+    #當輸入的key資訊在data2捷運字典裡面時，取出該捷運路線的value
+    if data["events"][0]["message"]["text"] in data2:
+        num2 = data["events"][0]["message"]["text"]
+        num_2 = data2[""+num2+""]
+        line_bot_api.reply_message(
+        data["events"][0]["replyToken"],
+        TextSendMessage(text = ""+num_2+""))
+    
+    #輸入表情貼
+    elif "emojis" in data["events"][0]["message"]:
+        line_bot_api.reply_message(
+        data["events"][0]["replyToken"],
+        TextSendMessage(text = "請輸入文字訊息查詢即時資訊呦~"))
+        
+    #設定line圖文選單的自動回復
+    elif data["events"][0]["message"]["text"] == "查詢即時公車資訊":
+        line_bot_api.reply_message(
+        data["events"][0]["replyToken"],
+        TextSendMessage(text = "請輸入「公車號碼」，查詢即時公車資訊 (範例：藍38、916)"))
+        
+    elif data["events"][0]["message"]["text"] == "查詢即時天氣資訊":
+        line_bot_api.reply_message(
+        data["events"][0]["replyToken"],
+        TextSendMessage(text = "請輸入「縣市名鄉鎮區名」，查詢即時天氣資訊 (範例：新北市板橋區)"))
+        
+    elif data["events"][0]["message"]["text"] == "查詢即時捷運資訊":
+        line_bot_api.reply_message(
+        data["events"][0]["replyToken"],
+        TextSendMessage(text = "請輸入「起站終站」，查詢即時捷運資訊 (範例：台北車站南港展覽館)"))
+    
+    #當用戶輸入數字在公車字典中，則回傳該數字的網址
+    elif data["events"][0]["message"]["text"] in data1:
+        num1 = data["events"][0]["message"]["text"]
+        num_1 = data1[""+num1+""]
+        
+        #取得該公車路線的線上圖片
+        driver = webdriver.Chrome("C:\\Users\\kaiki\\wangpython\\chromedriver.exe")
+        driver.get("https://ebus.gov.taipei/Route/StopsOfRoute?routeid="+num_1)   #開啟該路線的網址 
+        pic = WebDriverWait(driver,10).until(EC.element_to_be_clickable((By.CSS_SELECTOR,'a[title="路線圖"]')))
+        pic.click()     #點擊路線圖
+        driver.switch_to.window(driver.window_handles[1])     #處理點擊後出現新分頁的問題
+        anchor = driver.find_element(By.TAG_NAME ,"img")
+        busurl = anchor.get_attribute("src")                  #抓取圖片網址
+        
+        line_bot_api.reply_message(
+        data["events"][0]["replyToken"],
+        FlexSendMessage(
+    alt_text="【等公車小幫手】即時公車資訊",
+    contents={
+  "type": "bubble",
+  "body": {
+    "type": "box",
+    "layout": "vertical",
+    "contents": [
+      {
+        "type": "text",
+        "text": "歡迎使用 【等公車小幫手】"
+      },
+      {
+        "type": "text",
+        "text": "點擊圖片，取得及時路線資訊"
+      },
+      {
+        "type": "image",
+        "url": busurl,            #顯示該公車的線上路線圖
+        "size": "full",
+        "action": {
+          "type": "uri",
+          "label": "action",
+          "uri": "https://ebus.gov.taipei/Route/StopsOfRoute?routeid="+num_1     #點擊圖片後連結至該路線的大台北公車網址
+        }
+      }
+    ]
+  }
+}))
+        
+    #輸入縣市名鄉鎮區名，即時爬蟲查詢天氣        
+    else:
+        driver = webdriver.Chrome("C:\\Users\\kaiki\\wangpython\\chromedriver.exe")
+        driver.get("https://weather.com/zh-TW/weather/today/l/TWXX0021:1:TW")
+
+        username = WebDriverWait(driver,10).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="LocationSearch_input"]')))
+        
+        try:
+            username.send_keys(""+data["events"][0]["message"]["text"]+"")
+        except WebDriverException:
+            line_bot_api.reply_message(data["events"][0]["replyToken"],TextSendMessage(text = "請輸入文字訊息查詢即時資訊呦~"))
+        
+        username.send_keys(Keys.ENTER)
+        sleep(2)     #該網站需停幾秒才能按enter搜尋
+        username.send_keys(Keys.ENTER)
+        
+        #用beautiful soup抓資料
+        res = requests.get(driver.current_url)  #將網址吐出來
+        soup = BeautifulSoup(res.text)
+
+        area = soup.find("h1", class_="CurrentConditions--location--1YWj_").text                #地區
+        time = "今日"+soup.find("span", class_="CurrentConditions--timestamp--1ybTk").text      #時間戳記
+        ad = soup.find("div", class_="CurrentConditions--phraseValue--mZC_p").text              #天氣狀況
+        temp = "溫度："+soup.find("span", class_="CurrentConditions--tempValue--MHmYY").text    #溫度    
+        ampmtemp = soup.find("div", class_="CurrentConditions--tempHiLoValue--3T1DG").text      #白天夜晚溫度
+        
+        line_bot_api.reply_message(
+        data["events"][0]["replyToken"],
+        FlexSendMessage(
+    alt_text="【等公車小幫手】即時天氣資訊",
+    contents={
+  "type": "bubble",
+  "body": {
+    "type": "box",
+    "layout": "vertical",
+    "contents": [
+      {
+        "type": "text",
+        "text": area
+      },
+      {
+        "type": "text",
+        "text": time
+      },
+      {
+        "type": "text",
+        "text": ad
+      },
+      {
+        "type": "text",
+        "text": temp
+      },
+      {
+        "type": "text",
+        "text": ampmtemp
+      }
+    ]
+  }
+}))
+
+
+    return 'OK',200
+
+if __name__ == "__main__":
+    app.run(port=2000)
